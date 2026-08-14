@@ -48,6 +48,7 @@ your own key instead.
 npm install
 npm run dev     # dev server
 npm run build   # production build
+npm test        # unit tests (pure lib functions)
 ```
 
 See `RESEARCH.md` and `PLAN.md` for the research synthesis and phased

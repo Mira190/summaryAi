@@ -7,8 +7,11 @@
 // makes can be traced back to a verbatim span in the source text -- that grounding is
 // what the UI highlights, and it's the core defense against unverifiable hallucination.
 
+import { fetchWithTimeout } from "./http";
+
 const API_URL = "https://api.anthropic.com/v1/messages";
 const MAX_SOURCE_CHARS = 60000; // keep BYO-key spend predictable; long-form is a later iteration
+const LLM_TIMEOUT_MS = 60000; // summarizing a long source can take a while
 
 const SUMMARY_TOOL = {
   name: "structured_summary",
@@ -81,24 +84,30 @@ export async function summarizeSource({ apiKey, model = "claude-sonnet-5", meta,
   if (!apiKey) throw new Error("No API key set. Add your Anthropic API key in Settings.");
   if (!text) throw new Error("No source text was available to summarize.");
 
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
+  const res = await fetchWithTimeout(
+    API_URL,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 2000,
+        system: SYSTEM_PROMPT,
+        tools: [SUMMARY_TOOL],
+        tool_choice: { type: "tool", name: "structured_summary" },
+        messages: [{ role: "user", content: buildPrompt({ meta, text, provenance }) }],
+      }),
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: 2000,
-      system: SYSTEM_PROMPT,
-      tools: [SUMMARY_TOOL],
-      tool_choice: { type: "tool", name: "structured_summary" },
-      messages: [{ role: "user", content: buildPrompt({ meta, text, provenance }) }],
-    }),
-  });
+    LLM_TIMEOUT_MS
+  );
 
+  if (res.status === 401) throw new Error("Anthropic rejected the API key — check it in Settings.");
+  if (res.status === 429) throw new Error("Anthropic rate limit hit — wait a moment and try again.");
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error?.message || `Anthropic API error (HTTP ${res.status})`);

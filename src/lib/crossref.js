@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./http";
+
 // Crossref REST API: free, keyless, no rate-limit auth required.
 // https://api.crossref.org/works/{doi}
 // Coverage caveat (verified 2026-08): abstract field is publisher-deposited and wildly
@@ -14,11 +16,12 @@ function stripJats(xmlish) {
 }
 
 export async function fetchCrossrefWork(doi) {
-  const res = await fetch(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, {
+  const res = await fetchWithTimeout(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, {
     headers: { Accept: "application/json" },
   });
 
   if (res.status === 404) return null;
+  if (res.status === 429) throw new Error("Crossref rate limit hit — try again shortly.");
   if (!res.ok) throw new Error(`Crossref lookup failed (HTTP ${res.status})`);
 
   const { message } = await res.json();

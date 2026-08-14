@@ -40,41 +40,47 @@ branch; Phases 1+ are scoped for a future engineering agent.
   human running it locally/on a real deploy) needs to smoke-test the
   live pipeline end-to-end before calling this production-ready.
 
-## Phase 1 — Harden the MVP (recommended next, before adding features)
+## Phase 1 — Harden the MVP
 
-1. **Live smoke test.** Run the app somewhere with normal network access.
-   Test: a DOI with a known-open abstract-only paper (should show amber
-   "abstract-only" banner), a DOI with known full OA text (should show
-   green "full-text-oa" and highlighted grounded quotes), a DOI that
-   doesn't resolve (should show a clean "unavailable" state, not a crash),
-   a plain non-DOI URL, and a bad/expired Anthropic key (should surface
-   the API's error message, not a blank screen).
-2. **Unit tests.** Add a real test runner (Vitest fits the existing Vite
-   setup) for the pure functions that already have ad-hoc node-script
-   verification: `doi.js` (`extractDoi`/`classifyInput`), `highlight.js`
-   (`splitWithHighlights`), `openalex.js` (`reconstructAbstract`). These
-   are pure and fast — no network mocking needed.
-3. **Error/edge-case pass on the network functions**: timeouts (the
-   fetch calls in `crossref.js`/`openalex.js`/`unpaywall.js`/`extract.js`
-   have no `AbortSignal.timeout`; a hung request currently hangs the UI
-   indefinitely), and rate-limit handling (Unpaywall's 100k/day is high
-   enough to ignore for a single-user client-side app, but a 429 from any
-   of these should surface a specific, actionable message rather than the
-   generic "HTTP {status}" text currently thrown).
-4. **Accessibility pass**: `SettingsPanel` modal needs focus trapping and
-   Escape-to-close; `HistoryList` items are now real `<button>`s (fixed
-   from the original clickable-`<div>` bug) but should get proper
-   `aria-label`s including the DOI/URL, not just the truncated title.
-5. **`npm audit`**: 15 vulnerabilities were reported on `npm install`
-   (mostly stale dev-dependency chain from `vite@4`/`tailwindcss@3`).
-   Worth a dependency bump pass (`vite@5+`, current `tailwindcss`) since
-   none of the app's actual runtime logic depends on old APIs.
-6. **Dependency check**: `package.json` still lists `preact` as the sole
-   runtime dependency with `@preact/preset-vite` aliasing `react`/
-   `react-dom` imports to `preact/compat` — this worked pre-restructure
-   and still built cleanly post-restructure, but wasn't stress-tested
-   beyond `npm run build` + one Playwright pass. Confirm it holds up under
-   `vite preview` (production build serving) too, not just `vite dev`.
+Status: items 2–5 are done. Item 1 (the live network smoke test) is still
+blocked in the sandbox this was built in — see "still open" below.
+
+1. **Live smoke test — still open, needs an agent/human with real network
+   access.** Test: a DOI with a known-open abstract-only paper (should
+   show amber "abstract-only" banner), a DOI with known full OA text
+   (should show green "full-text-oa" and highlighted grounded quotes), a
+   DOI that doesn't resolve (should show a clean "unavailable" state, not
+   a crash), a plain non-DOI URL, and a bad/expired Anthropic key (should
+   surface the API's error message, not a blank screen).
+2. **Unit tests — done.** Vitest added (`npm test`); 24 tests across
+   `src/lib/doi.test.js`, `highlight.test.js`, `openalex.test.js` covering
+   `extractDoi`/`classifyInput`, `splitWithHighlights` (including overlap-
+   merging and the not-found-verbatim case), and `reconstructAbstract`.
+3. **Timeouts/error handling — done.** `src/lib/http.js` adds a shared
+   `fetchWithTimeout` (15s default, 30s for Reader extraction, 60s for the
+   LLM call) used by every external call in `crossref.js`/`openalex.js`/
+   `unpaywall.js`/`extract.js`/`llm.js`. Each also has explicit `429`
+   messages and `llm.js` additionally has a `401` ("check your key")
+   message rather than a generic `HTTP {status}`.
+4. **Accessibility — done.** `SettingsPanel` now has focus-on-open,
+   Tab focus-trapping, Escape-to-close, and backdrop-click-to-close —
+   verified live via Playwright (focus lands on the key field on open;
+   Escape and backdrop click both close it; 6 Tab presses stay inside the
+   dialog). `HistoryList` buttons now carry `aria-label`/`title` with the
+   full DOI/URL, not just the truncated display title.
+5. **`npm audit` — done.** Bumped `vite` 4→8, `@preact/preset-vite`
+   2.5→2.10, `autoprefixer`, and `preact` to latest; kept `tailwindcss` on
+   the latest 3.x (not the v4 rewrite, to avoid an unrelated config
+   migration). `npm audit` now reports 0 vulnerabilities (was 13-15,
+   entirely in the esbuild/babel/glob dev-tooling chain, not runtime app
+   code). Verified via full rebuild + test run + a live Playwright pass
+   (zero console/page errors, identical rendering) that nothing broke
+   across the 4-major-version jump.
+6. **Dependency correctness fix.** While bumping deps, `npm install -D`
+   briefly moved `preact` into `devDependencies` (a runtime dependency
+   being installed as a dev flag) — caught and corrected before commit.
+   Worth double-checking `package.json`'s dependencies/devDependencies
+   split after any future bulk dependency bump.
 
 ## Phase 2 — Citation-graph comparison (the #4 differentiator from RESEARCH.md, not yet built)
 

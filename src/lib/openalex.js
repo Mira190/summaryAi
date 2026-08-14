@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./http";
+
 // OpenAlex API: free, keyless for light use (polite pool via mailto param recommended).
 // https://api.openalex.org/works/doi:{doi}
 // OpenAlex stores abstracts as a word->positions inverted index (not raw text) specifically
@@ -16,11 +18,12 @@ export function reconstructAbstract(invertedIndex) {
 
 export async function fetchOpenAlexWork(doi, { mailto } = {}) {
   const params = mailto ? `?mailto=${encodeURIComponent(mailto)}` : "";
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.openalex.org/works/doi:${encodeURIComponent(doi)}${params}`
   );
 
   if (res.status === 404) return null;
+  if (res.status === 429) throw new Error("OpenAlex rate limit hit — try again shortly.");
   if (!res.ok) throw new Error(`OpenAlex lookup failed (HTTP ${res.status})`);
 
   const work = await res.json();

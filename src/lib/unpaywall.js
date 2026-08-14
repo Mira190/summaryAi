@@ -1,14 +1,17 @@
+import { fetchWithTimeout } from "./http";
+
 // Unpaywall API: free, keyless, "polite pool" via required email query param.
 // https://api.unpaywall.org/v2/{doi}?email=...  (100,000 calls/day per verified docs)
 
 export async function fetchUnpaywall(doi, email) {
   if (!email) throw new Error("Unpaywall requires a contact email (set once in Settings).");
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=${encodeURIComponent(email)}`
   );
 
   if (res.status === 404) return null;
+  if (res.status === 429) throw new Error("Unpaywall rate limit hit — try again shortly.");
   if (!res.ok) throw new Error(`Unpaywall lookup failed (HTTP ${res.status})`);
 
   const data = await res.json();
