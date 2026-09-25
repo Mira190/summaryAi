@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveSummary } from "./resolve";
+import { fallbackNotice, resolveSummary } from "./resolve";
 import { parseInput } from "../utils/input";
 import {
   abortError,
@@ -122,14 +122,14 @@ describe("resolveSummary", () => {
     expect(fetchMock.mock.calls[1][0]).toContain(encodeURIComponent(url));
   });
 
-  it("DOI from a publisher URL: 404 plus a failing URL still reports DOI not found", async () => {
+  it("DOI from a publisher URL: 404 plus an unconfigured summarizer keeps the actionable code", async () => {
     vi.stubEnv("VITE_RAPID_API_ARTICLE_KEY", "");
     const url = "https://www.biorxiv.org/content/10.1101/2020.01.01.123456v1.full.pdf";
     const fetchMock = stubFetch([[isCrossref, () => jsonResponse("Resource not found.", 404)]]);
     const err = await resolveSummary({ ...parseInput(url), input: url }).catch((e) => e);
     expect(err).toMatchObject({
       name: "ResolveError",
-      code: "doi_not_found",
+      code: "missing_key",
       message:
         "DOI not found: no Crossref record for 10.1101/2020.01.01.123456v1. " +
         "The page itself could not be summarized either: " +
@@ -137,6 +137,23 @@ describe("resolveSummary", () => {
     });
     expect(err.cause).toMatchObject({ code: "missing_key" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [() => jsonResponse({}, 429), "rate_limited"],
+    [() => jsonResponse({}, 403), "key_rejected"],
+    [() => Promise.reject(new TypeError("Failed to fetch")), "network"],
+    [() => jsonResponse({ error: "Cannot extract" }, 400), "doi_not_found"],
+    [() => jsonResponse({}, 502), "doi_not_found"],
+  ])("DOI from a publisher URL: 404 plus a failing URL (%#) reports %s", async (respond, code) => {
+    const url = "https://www.biorxiv.org/content/10.1101/2020.01.01.123456v1.full.pdf";
+    stubFetch([
+      [isCrossref, () => jsonResponse("Resource not found.", 404)],
+      [isRapidApi, respond],
+    ]);
+    const err = await resolveSummary({ ...parseInput(url), input: url }).catch((e) => e);
+    expect(err).toMatchObject({ name: "ResolveError", code });
+    expect(err.message).toMatch(/^DOI not found: no Crossref record for 10\.1101\/2020\.01\.01\.123456v1\. /);
   });
 
   it("DOI from a publisher URL: tries the pasted URL when the doi.org link cannot be summarized", async () => {
@@ -180,21 +197,48 @@ describe("resolveSummary", () => {
     ]);
     const result = await resolveSummary({ ...parseInput(url), input: url });
     expect(rapidCalls).toBe(2);
+    // The notice explains the first (doi.org) failure, not the transient retry failure.
     expect(result).toMatchObject({
       source: "abstract",
-      notice: "The summarizer could not be reached; showing the publisher's abstract.",
+      notice: "The full text could not be extracted; showing the publisher's abstract.",
     });
   });
 
-  it("DOI from a publisher URL: does not retry the pasted URL when the quota is used up", async () => {
+  it("DOI from a publisher URL: without an abstract, reports the first failure with the last as cause", async () => {
     const url = "https://link.springer.com/article/10.1038/nature12373";
-    const fetchMock = stubFetch([
+    let rapidCalls = 0;
+    stubFetch([
+      [isCrossref, () => jsonResponse({ message: { ...crossrefWork, abstract: undefined } })],
+      [
+        isRapidApi,
+        () =>
+          ++rapidCalls === 1
+            ? jsonResponse({ error: "Paywall" }, 400)
+            : Promise.reject(new TypeError("offline")),
+      ],
+    ]);
+    const err = await resolveSummary({ ...parseInput(url), input: url }).catch((e) => e);
+    expect(rapidCalls).toBe(2);
+    expect(err).toMatchObject({ name: "ResolveError", code: "extract_failed" });
+    expect(err.message).toMatch(/Paywall/);
+    expect(err.cause).toMatchObject({ code: "network" });
+    expect(err.partial).toMatchObject({ doi: DOI });
+  });
+
+  it.each([
+    ["a network failure", () => Promise.reject(new TypeError("Failed to fetch")), "network"],
+    ["a 503", () => jsonResponse({}, 503), "extract_failed"],
+    ["a 429", () => jsonResponse({}, 429), "rate_limited"],
+  ])("DOI from a publisher URL: does not retry the pasted URL after %s", async (_label, respond, code) => {
+    const url = "https://link.springer.com/article/10.1038/nature12373";
+    const summarizer = vi.fn(respond);
+    stubFetch([
       [isCrossref, () => jsonResponse({ message: crossrefWork })],
-      [isRapidApi, () => jsonResponse({}, 429)],
+      [isRapidApi, summarizer],
     ]);
     const result = await resolveSummary({ ...parseInput(url), input: url });
-    expect(result.source).toBe("abstract");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(summarizer).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ source: "abstract", notice: fallbackNotice(code) });
   });
 
   it("DOI from a www.doi.org link: a Crossref 404 is reported as DOI not found", async () => {

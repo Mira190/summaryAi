@@ -22,7 +22,16 @@ const FALLBACK_NOTICES = {
   extract_failed: "The full text could not be extracted; showing the publisher's abstract.",
   network: "The summarizer could not be reached; showing the publisher's abstract.",
 };
-const UNRETRYABLE_CODES = new Set(["missing_key", "key_rejected", "rate_limited"]);
+
+// Summarizer failures about the service itself rather than the page:
+// no key, rejected key, exhausted quota, unreachable. Another URL cannot fix
+// them (so they stop retries), and they tell the user something actionable
+// (so they win over the less specific "DOI not found").
+const SERVICE_ERROR_CODES = new Set(["missing_key", "key_rejected", "rate_limited", "network"]);
+
+function isRetryable(err) {
+  return !SERVICE_ERROR_CODES.has(err.code) && !(err.status >= 500);
+}
 
 const DEFAULT_FALLBACK_NOTICE =
   "The full text could not be summarized; showing the publisher's abstract.";
@@ -96,7 +105,7 @@ async function resolveDoi({ doi, url: sourceUrl, input }, { signal }) {
       } catch (urlErr) {
         if (isAbortError(urlErr)) throw urlErr;
         throw new ResolveError(
-          "doi_not_found",
+          SERVICE_ERROR_CODES.has(urlErr.code) ? urlErr.code : "doi_not_found",
           `${err.message} The page itself could not be summarized either: ${urlErr.message}`,
           { cause: urlErr }
         );
@@ -107,39 +116,40 @@ async function resolveDoi({ doi, url: sourceUrl, input }, { signal }) {
 
   const hasMeta = Boolean(result.title || result.abstract || result.authors.length);
 
-  let err;
-  try {
-    const { summary } = await summarizeUrl(toDoiUrl(result.doi), { signal });
-    return { ...result, summary, source: "summary" };
-  } catch (doiErr) {
-    if (isAbortError(doiErr)) throw doiErr;
-    err = doiErr;
-  }
-
-  // The doi.org redirect may land on a page the extractor cannot read; the
-  // pasted publisher URL can still work. Skip this when a second request
-  // cannot succeed either (no key, rejected key, quota exhausted).
-  if (sourceUrl && !UNRETRYABLE_CODES.has(err.code)) {
+  // Try the doi.org link first, then the pasted publisher URL (the doi.org
+  // redirect may land on a page the extractor cannot read). Stop early when
+  // another attempt cannot help.
+  const candidates = [toDoiUrl(result.doi), sourceUrl].filter(Boolean);
+  let firstErr = null;
+  let lastErr = null;
+  for (const candidate of candidates) {
     try {
-      const { summary } = await summarizeUrl(sourceUrl, { signal });
+      const { summary } = await summarizeUrl(candidate, { signal });
       return { ...result, summary, source: "summary" };
-    } catch (urlErr) {
-      if (isAbortError(urlErr)) throw urlErr;
-      err = urlErr;
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      firstErr ??= err;
+      lastErr = err;
+      if (!isRetryable(err)) break;
     }
   }
 
+  // Report the first failure (the doi.org attempt): it explains why the
+  // paper itself could not be summarized; a later retry failing for a
+  // transient reason should not mask it.
   if (result.abstract) {
     return {
       ...result,
       summary: result.abstract,
       source: "abstract",
-      notice: fallbackNotice(err.code),
+      notice: fallbackNotice(firstErr.code),
     };
   }
   throw new ResolveError(
-    err.code ?? "unknown",
-    hasMeta ? `${err.message} Crossref has no abstract for this paper either.` : err.message,
-    { partial: hasMeta ? result : null, cause: err }
+    firstErr.code ?? "unknown",
+    hasMeta
+      ? `${firstErr.message} Crossref has no abstract for this paper either.`
+      : firstErr.message,
+    { partial: hasMeta ? result : null, cause: lastErr }
   );
 }

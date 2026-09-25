@@ -35,9 +35,11 @@ API on RapidAPI.
    (404) stops here with "DOI not found" — unless the DOI was taken from a
    publisher URL, in which case that URL is summarized directly instead.
 2. Ask the summarizer to summarize `https://doi.org/{doi}`. If that fails and
-   the DOI came from a publisher URL, try summarizing that URL too.
+   the DOI came from a publisher URL, try summarizing that URL too — except
+   when another attempt cannot help: missing or rejected API key, exhausted
+   quota, network error, or a server error (5xx) from the summarizer.
 3. If summarizing still fails and Crossref has an abstract, show the abstract
-   instead, with a short note on why.
+   instead, with a short note on why the `doi.org` attempt failed.
 4. If neither works, show the error and keep whatever metadata was found.
 
 ## Getting started

@@ -83,10 +83,10 @@ export function findEntry(list, { doi, url } = {}) {
  * summary stored under the URL.
  */
 export function findCachedSummary(list, { doi, url } = {}) {
-  for (const entry of [findByDoi(list, doi), findByUrl(list, url)]) {
-    if (entry?.source === "summary") return entry;
-  }
-  return null;
+  const byDoi = findByDoi(list, doi);
+  if (byDoi?.source === "summary") return byDoi;
+  const byUrl = findByUrl(list, url);
+  return byUrl?.source === "summary" ? byUrl : null;
 }
 
 /** Summary history persisted in localStorage under "articles". */

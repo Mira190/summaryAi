@@ -12,17 +12,16 @@ const HistoryList = ({ items, activeId, onSelect, onDelete }) => {
   const [copiedId, setCopiedId] = useState(null);
   const timerRef = useRef(null);
   // Each copy click gets a sequence number; only the latest click may update
-  // the icon, and nothing updates after unmount.
+  // the icon. Unmounting bumps the counter so in-flight copies go stale too.
   const copySeqRef = useRef(0);
-  const mountedRef = useRef(false);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
+  useEffect(
+    () => () => {
+      copySeqRef.current += 1;
       clearTimeout(timerRef.current);
-    };
-  }, []);
+    },
+    []
+  );
 
   if (items.length === 0) return null;
 
@@ -37,7 +36,7 @@ const HistoryList = ({ items, activeId, onSelect, onDelete }) => {
       // Permission denied or insecure context: leave the icon unchanged.
       return;
     }
-    if (!mountedRef.current || seq !== copySeqRef.current) return;
+    if (seq !== copySeqRef.current) return;
     setCopiedId(item.id);
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopiedId(null), COPIED_MS);

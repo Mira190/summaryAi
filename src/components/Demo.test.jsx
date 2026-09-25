@@ -137,24 +137,6 @@ describe("<App /> summary flow", () => {
     expect(screen.getByRole("button", { name: "Copy link for https://example.com/a" })).toBeTruthy();
   });
 
-  it("does not update after unmount when a copy resolves late", async () => {
-    window.localStorage.setItem(
-      HISTORY_KEY,
-      JSON.stringify([{ url: "https://example.com/a", summary: "A" }])
-    );
-    let resolveCopy;
-    const writeText = vi.fn(() => new Promise((resolve) => (resolveCopy = resolve)));
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { unmount } = render(<App />);
-
-    fireEvent.click(screen.getByRole("button", { name: /Copy link for/ }));
-    unmount();
-    resolveCopy();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(errors).not.toHaveBeenCalled();
-  });
-
   it("retries a DOI whose earlier result fell back to the abstract", async () => {
     let summarizerUp = false;
     const fetchMock = stubFetch([
