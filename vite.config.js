@@ -10,5 +10,6 @@ export default defineConfig({
     restoreMocks: true,
     unstubGlobals: true,
     unstubEnvs: true,
+    setupFiles: ["src/test/setup.js"],
   },
 });
