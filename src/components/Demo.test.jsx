@@ -1,0 +1,97 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
+
+import App from "../App";
+import { HISTORY_KEY } from "../hooks/useHistory";
+import { crossrefWork, isCrossref, isRapidApi, jsonResponse, stubFetch } from "../test/fetch";
+
+const DOI = "10.1038/nature12373";
+const TITLE = "Nanometre-scale thermometry in a living cell";
+
+function submit(value) {
+  const input = screen.getByLabelText("DOI or article URL");
+  fireEvent.input(input, { target: { value } });
+  fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
+}
+
+describe("<App /> summary flow", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_RAPID_API_ARTICLE_KEY", "test-key");
+    vi.stubEnv("VITE_CROSSREF_MAILTO", "");
+  });
+
+  it("summarizes a DOI and shows its metadata", async () => {
+    const fetchMock = stubFetch([
+      [isCrossref, () => jsonResponse({ message: crossrefWork })],
+      [isRapidApi, () => jsonResponse({ summary: "Diamond sensors measure temperature." })],
+    ]);
+    render(<App />);
+    submit(DOI);
+
+    expect(await screen.findByRole("heading", { name: TITLE })).toBeTruthy();
+    expect(screen.getByText("Diamond sensors measure temperature.")).toBeTruthy();
+    expect(screen.getByText("G. Kucsko, P. C. Maurer, Consortium X")).toBeTruthy();
+    expect(screen.getByText("Nature · 2013")).toBeTruthy();
+    expect(screen.queryByText("Publisher abstract via Crossref")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Saved to history; submitting again is served from history without fetching.
+    const history = screen.getByRole("list", { name: "Recent summaries" });
+    expect(within(history).getByText(TITLE)).toBeTruthy();
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(HISTORY_KEY))).toHaveLength(1));
+    submit(`https://doi.org/${DOI}`);
+    expect(await screen.findByRole("heading", { name: TITLE })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("labels the Crossref abstract fallback", async () => {
+    stubFetch([
+      [isCrossref, () => jsonResponse({ message: crossrefWork })],
+      [isRapidApi, () => jsonResponse({ error: "Paywall" }, 400)],
+    ]);
+    render(<App />);
+    submit(`doi:${DOI}`);
+
+    expect(await screen.findByText("Publisher abstract via Crossref")).toBeTruthy();
+    expect(screen.getByText("Sensitive probing of temperature.")).toBeTruthy();
+  });
+
+  it("shows a readable error for invalid input without calling any API", async () => {
+    const fetchMock = stubFetch([]);
+    render(<App />);
+    submit("not-a-doi");
+
+    expect(await screen.findByText(/doesn't look like a DOI or a web link/)).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("copies and deletes history entries without selecting them", async () => {
+    window.localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify([{ url: "https://example.com/old", summary: "Old summary" }])
+    );
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy link for/ }));
+    expect(writeText).toHaveBeenCalledWith("https://example.com/old");
+    expect(screen.queryByText("Old summary")).toBeNull();
+    expect(screen.getByRole("button", { name: "Link copied" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete .* from history/ }));
+    expect(screen.queryByRole("list", { name: "Recent summaries" })).toBeNull();
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(HISTORY_KEY))).toEqual([]));
+  });
+
+  it("shows a history entry when it is selected", () => {
+    window.localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify([{ url: "https://example.com/old", summary: "Old summary" }])
+    );
+    render(<App />);
+    fireEvent.click(screen.getByTitle("https://example.com/old"));
+    expect(screen.getByText("Old summary")).toBeTruthy();
+    expect(screen.getByLabelText("DOI or article URL").value).toBe("https://example.com/old");
+  });
+});

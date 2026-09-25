@@ -47,7 +47,7 @@
 }
 
 .submit_btn {
-  @apply hover:border-gray-700 hover:text-gray-700 absolute inset-y-0 right-0 my-1.5 mr-1.5 flex w-10 items-center justify-center rounded border border-gray-200 font-sans text-sm font-medium text-gray-400;
+  @apply hover:border-gray-700 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50 absolute inset-y-0 right-0 my-1.5 mr-1.5 flex w-10 items-center justify-center rounded border border-gray-200 font-sans text-sm font-medium text-gray-400;
 }
 
 .link_card {
@@ -55,7 +55,7 @@
 }
 
 .copy_btn {
-  @apply w-7 h-7 rounded-full bg-white/10 shadow-[inset_10px_-50px_94px_0_rgb(199,199,199,0.2)] backdrop-blur flex justify-center items-center cursor-pointer;
+  @apply w-7 h-7 shrink-0 rounded-full bg-white/10 shadow-[inset_10px_-50px_94px_0_rgb(199,199,199,0.2)] backdrop-blur flex justify-center items-center cursor-pointer;
 }
 
 .blue_gradient {
@@ -64,4 +64,11 @@
 
 .summary_box {
   @apply rounded-xl border border-gray-200 bg-white/20 shadow-[inset_10px_-50px_94px_0_rgb(199,199,199,0.2)] backdrop-blur p-4;
+}
+.delete_btn {
+  @apply w-7 h-7 shrink-0 rounded-full flex justify-center items-center text-lg leading-none text-gray-400 hover:text-red-600 hover:bg-red-50;
+}
+
+.source_badge {
+  @apply self-start rounded-full bg-white/30 px-2.5 py-0.5 text-xs font-satoshi font-medium text-white;
 }

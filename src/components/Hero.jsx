@@ -1,31 +1,27 @@
 import { logo } from "../assets";
 
-const Hero = () => {
-  return (
-    <header className="w-full flex justify-center items-center flex-col">
-      <nav className="flex justify-between items-center w-full mb-10 pt-3">
-        <img src={logo} alt="sumz_logo" className="w-40 object-contain" />
+const REPO_URL = "https://github.com/Mira190/summaryAi";
 
-        <button
-          type="button"
-          onClick={() => window.open("https://github.com/mira190", "_blank")}
-          className="black_btn"
-        >
-          GitHub
-        </button>
-      </nav>
+const Hero = () => (
+  <header className="w-full flex justify-center items-center flex-col">
+    <nav className="flex justify-between items-center w-full mb-10 pt-3">
+      <img src={logo} alt="SummaryAI logo" className="w-40 object-contain" />
 
-      <h1 className="head_text">
-        Summarize Your Research with <br className="max-md:hidden" />
-        <span className="orange_gradient ">AI-Powered GPT4</span>
-      </h1>
-      <h2 className="desc">
-        Revolutionize Your Research Process with Our AI-Enabled Literature
-        Review Platform. Automatically Generate Accurate and Concise Summaries
-        of Academic Papers in Seconds.
-      </h2>
-    </header>
-  );
-};
+      <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="black_btn">
+        GitHub
+      </a>
+    </nav>
+
+    <h1 className="head_text">
+      Summarize Research Papers <br className="max-md:hidden" />
+      <span className="orange_gradient">from a DOI</span>
+    </h1>
+    <h2 className="desc">
+      Paste a DOI or an article link. SummaryAI looks up the paper on Crossref and generates a
+      concise AI summary of the article — falling back to the publisher&apos;s abstract when the
+      full text can&apos;t be read.
+    </h2>
+  </header>
+);
 
 export default Hero;
