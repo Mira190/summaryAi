@@ -39,7 +39,9 @@ API on RapidAPI.
    when another attempt cannot help: missing or rejected API key, exhausted
    quota, network error, or a server error (5xx) from the summarizer.
 3. If summarizing still fails and Crossref has an abstract, show the abstract
-   instead, with a short note on why the `doi.org` attempt failed.
+   instead, with a short note on why: a problem with the summarizer service
+   itself (key, quota, connectivity) if one occurred, otherwise why the
+   `doi.org` attempt failed.
 4. If neither works, show the error and keep whatever metadata was found.
 
 ## Getting started

@@ -96,6 +96,7 @@ describe("resolveSummary", () => {
     const fetchMock = stubFetch([[isCrossref, () => jsonResponse("Resource not found.", 404)]]);
     await expect(resolveSummary({ doi: "10.1038/missing" })).rejects.toMatchObject({
       code: "doi_not_found",
+      status: 404,
       message: expect.stringMatching(/DOI not found/),
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -140,12 +141,12 @@ describe("resolveSummary", () => {
   });
 
   it.each([
-    [() => jsonResponse({}, 429), "rate_limited"],
-    [() => jsonResponse({}, 403), "key_rejected"],
-    [() => Promise.reject(new TypeError("Failed to fetch")), "network"],
-    [() => jsonResponse({ error: "Cannot extract" }, 400), "doi_not_found"],
-    [() => jsonResponse({}, 502), "doi_not_found"],
-  ])("DOI from a publisher URL: 404 plus a failing URL (%#) reports %s", async (respond, code) => {
+    [() => jsonResponse({}, 429), "rate_limited", 429],
+    [() => jsonResponse({}, 403), "key_rejected", 403],
+    [() => Promise.reject(new TypeError("Failed to fetch")), "network", undefined],
+    [() => jsonResponse({ error: "Cannot extract" }, 400), "doi_not_found", 404],
+    [() => jsonResponse({}, 502), "doi_not_found", 404],
+  ])("DOI from a publisher URL: 404 plus a failing URL (%#) reports %s", async (respond, code, status) => {
     const url = "https://www.biorxiv.org/content/10.1101/2020.01.01.123456v1.full.pdf";
     stubFetch([
       [isCrossref, () => jsonResponse("Resource not found.", 404)],
@@ -153,6 +154,7 @@ describe("resolveSummary", () => {
     ]);
     const err = await resolveSummary({ ...parseInput(url), input: url }).catch((e) => e);
     expect(err).toMatchObject({ name: "ResolveError", code });
+    expect(err.status).toBe(status);
     expect(err.message).toMatch(/^DOI not found: no Crossref record for 10\.1101\/2020\.01\.01\.123456v1\. /);
   });
 
@@ -185,44 +187,96 @@ describe("resolveSummary", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("DOI from a publisher URL: falls back to the abstract when the pasted URL fails too", async () => {
-    const url = "https://link.springer.com/article/10.1038/nature12373";
-    let rapidCalls = 0;
+  const PUBLISHER_URL = "https://link.springer.com/article/10.1038/nature12373";
+
+  /** Crossref OK; the summarizer answers the doi.org attempt, then the publisher URL. */
+  function stubTwoAttempts({ abstract = true, first, second }) {
+    const summarizer = vi.fn();
+    summarizer.mockImplementationOnce(first).mockImplementationOnce(second);
     stubFetch([
-      [isCrossref, () => jsonResponse({ message: crossrefWork })],
       [
-        isRapidApi,
-        () => (++rapidCalls === 1 ? jsonResponse({ error: "x" }, 400) : Promise.reject(new TypeError("offline"))),
+        isCrossref,
+        () => jsonResponse({ message: abstract ? crossrefWork : { ...crossrefWork, abstract: undefined } }),
       ],
+      [isRapidApi, summarizer],
     ]);
-    const result = await resolveSummary({ ...parseInput(url), input: url });
-    expect(rapidCalls).toBe(2);
-    // The notice explains the first (doi.org) failure, not the transient retry failure.
+    return summarizer;
+  }
+
+  const paywall = () => jsonResponse({ error: "Paywall" }, 400);
+
+  it("DOI from a publisher URL: a service error on the retry wins for the notice (network)", async () => {
+    const summarizer = stubTwoAttempts({
+      first: paywall,
+      second: () => Promise.reject(new TypeError("offline")),
+    });
+    const result = await resolveSummary({ ...parseInput(PUBLISHER_URL), input: PUBLISHER_URL });
+    expect(summarizer).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
       source: "abstract",
-      notice: "The full text could not be extracted; showing the publisher's abstract.",
+      notice: "The summarizer could not be reached; showing the publisher's abstract.",
     });
   });
 
-  it("DOI from a publisher URL: without an abstract, reports the first failure with the last as cause", async () => {
-    const url = "https://link.springer.com/article/10.1038/nature12373";
-    let rapidCalls = 0;
+  it("DOI from a publisher URL: a service error on the retry wins for the notice (429)", async () => {
+    stubTwoAttempts({ first: paywall, second: () => jsonResponse({}, 429) });
+    const result = await resolveSummary({ ...parseInput(PUBLISHER_URL), input: PUBLISHER_URL });
+    expect(result).toMatchObject({
+      source: "abstract",
+      notice: "The summarizer's quota is used up; showing the publisher's abstract.",
+    });
+  });
+
+  it("DOI from a publisher URL: page errors on both attempts report the first, mentioning the second", async () => {
+    stubTwoAttempts({
+      abstract: false,
+      first: paywall,
+      second: () => jsonResponse({ error: "Not an article" }, 422),
+    });
+    const err = await resolveSummary({ ...parseInput(PUBLISHER_URL), input: PUBLISHER_URL }).catch(
+      (e) => e
+    );
+    expect(err).toMatchObject({ name: "ResolveError", code: "extract_failed", status: 400 });
+    expect(err.message).toBe(
+      "The article could not be extracted: Paywall " +
+        "The publisher page could not be summarized either: The article could not be extracted: Not an article " +
+        "Crossref has no abstract for this paper either."
+    );
+    expect(err.cause).toMatchObject({ code: "extract_failed", status: 400 });
+    expect(err.partial).toMatchObject({ doi: DOI });
+  });
+
+  it("DOI from a publisher URL: without an abstract, a service error on the retry sets the code", async () => {
+    stubTwoAttempts({ abstract: false, first: paywall, second: () => jsonResponse({}, 429) });
+    const err = await resolveSummary({ ...parseInput(PUBLISHER_URL), input: PUBLISHER_URL }).catch(
+      (e) => e
+    );
+    expect(err).toMatchObject({ name: "ResolveError", code: "rate_limited", status: 429 });
+    expect(err.message).toMatch(/^The summarizer's request quota is used up/);
+    expect(err.message).toMatch(/The DOI link could not be summarized either: .*Paywall/);
+    expect(err.cause).toMatchObject({ code: "rate_limited" });
+  });
+
+  it("DOI from a publisher URL: identical failure messages are not repeated", async () => {
+    stubTwoAttempts({ abstract: false, first: paywall, second: paywall });
+    const err = await resolveSummary({ ...parseInput(PUBLISHER_URL), input: PUBLISHER_URL }).catch(
+      (e) => e
+    );
+    expect(err.message).toBe(
+      "The article could not be extracted: Paywall Crossref has no abstract for this paper either."
+    );
+  });
+
+  it("DOI: a summarizer 5xx without an abstract is reported with its status", async () => {
     stubFetch([
       [isCrossref, () => jsonResponse({ message: { ...crossrefWork, abstract: undefined } })],
-      [
-        isRapidApi,
-        () =>
-          ++rapidCalls === 1
-            ? jsonResponse({ error: "Paywall" }, 400)
-            : Promise.reject(new TypeError("offline")),
-      ],
+      [isRapidApi, () => jsonResponse({}, 503)],
     ]);
-    const err = await resolveSummary({ ...parseInput(url), input: url }).catch((e) => e);
-    expect(rapidCalls).toBe(2);
-    expect(err).toMatchObject({ name: "ResolveError", code: "extract_failed" });
-    expect(err.message).toMatch(/Paywall/);
-    expect(err.cause).toMatchObject({ code: "network" });
-    expect(err.partial).toMatchObject({ doi: DOI });
+    await expect(resolveSummary({ doi: DOI })).rejects.toMatchObject({
+      name: "ResolveError",
+      code: "extract_failed",
+      status: 503,
+    });
   });
 
   it.each([
@@ -284,6 +338,7 @@ describe("resolveSummary", () => {
     stubFetch([[isRapidApi, () => jsonResponse({}, 429)]]);
     await expect(resolveSummary({ url: "https://example.com/post" })).rejects.toMatchObject({
       code: "rate_limited",
+      status: 429,
     });
   });
 

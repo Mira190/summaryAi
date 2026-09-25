@@ -4,13 +4,17 @@ import { toDoiUrl } from "../utils/doi";
 import { urlKey } from "../utils/input";
 import { isAbortError } from "../utils/errors";
 
-/** Error surfaced to the UI. `partial` holds metadata we could still show. */
+/**
+ * Error surfaced to the UI. `partial` holds metadata we could still show;
+ * `status` is the HTTP status of the reported failure, when there was one.
+ */
 export class ResolveError extends Error {
-  constructor(code, message, { partial = null, cause } = {}) {
+  constructor(code, message, { partial = null, cause, status } = {}) {
     super(message, cause ? { cause } : undefined);
     this.name = "ResolveError";
     this.code = code;
     this.partial = partial;
+    this.status = status;
   }
 }
 
@@ -86,7 +90,7 @@ async function resolveUrl({ url, input }, { signal }) {
     return { ...result, summary, source: "summary" };
   } catch (err) {
     if (isAbortError(err)) throw err;
-    throw new ResolveError(err.code ?? "unknown", err.message, { cause: err });
+    throw new ResolveError(err.code ?? "unknown", err.message, { cause: err, status: err.status });
   }
 }
 
@@ -99,15 +103,18 @@ async function resolveDoi({ doi, url: sourceUrl, input }, { signal }) {
   } catch (err) {
     if (isAbortError(err)) throw err;
     if (err.code === "not_found") {
-      if (!sourceUrl) throw new ResolveError("doi_not_found", err.message, { cause: err });
+      if (!sourceUrl) {
+        throw new ResolveError("doi_not_found", err.message, { cause: err, status: err.status });
+      }
       try {
         return await resolveUrl({ url: sourceUrl, input }, { signal });
       } catch (urlErr) {
         if (isAbortError(urlErr)) throw urlErr;
+        const serviceError = SERVICE_ERROR_CODES.has(urlErr.code);
         throw new ResolveError(
-          SERVICE_ERROR_CODES.has(urlErr.code) ? urlErr.code : "doi_not_found",
+          serviceError ? urlErr.code : "doi_not_found",
           `${err.message} The page itself could not be summarized either: ${urlErr.message}`,
-          { cause: urlErr }
+          { cause: urlErr, status: serviceError ? urlErr.status : err.status }
         );
       }
     }
@@ -134,22 +141,34 @@ async function resolveDoi({ doi, url: sourceUrl, input }, { signal }) {
     }
   }
 
-  // Report the first failure (the doi.org attempt): it explains why the
-  // paper itself could not be summarized; a later retry failing for a
-  // transient reason should not mask it.
+  // Which failure to report: a service error (no key, rejected key, quota,
+  // unreachable) is actionable and wins, as in the Crossref-404 branch;
+  // otherwise the first (doi.org) failure, which explains why the paper
+  // itself could not be summarized.
+  const reported = SERVICE_ERROR_CODES.has(lastErr.code) ? lastErr : firstErr;
+  const other = reported === firstErr ? lastErr : firstErr;
+
   if (result.abstract) {
     return {
       ...result,
       summary: result.abstract,
       source: "abstract",
-      notice: fallbackNotice(firstErr.code),
+      notice: fallbackNotice(reported.code),
     };
   }
-  throw new ResolveError(
-    firstErr.code ?? "unknown",
-    hasMeta
-      ? `${firstErr.message} Crossref has no abstract for this paper either.`
-      : firstErr.message,
-    { partial: hasMeta ? result : null, cause: lastErr }
-  );
+
+  let message = reported.message;
+  if (other !== reported && other.message !== reported.message) {
+    message +=
+      other === lastErr
+        ? ` The publisher page could not be summarized either: ${other.message}`
+        : ` The DOI link could not be summarized either: ${other.message}`;
+  }
+  if (hasMeta) message += " Crossref has no abstract for this paper either.";
+
+  throw new ResolveError(reported.code ?? "unknown", message, {
+    partial: hasMeta ? result : null,
+    cause: reported,
+    status: reported.status,
+  });
 }
