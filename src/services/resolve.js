@@ -1,0 +1,174 @@
+import { fetchCrossrefWork } from "./crossref";
+import { summarizeUrl } from "./summarizer";
+import { toDoiUrl } from "../utils/doi";
+import { urlKey } from "../utils/input";
+import { isAbortError } from "../utils/errors";
+
+/**
+ * Error surfaced to the UI. `partial` holds metadata we could still show;
+ * `status` is the HTTP status of the reported failure, when there was one.
+ */
+export class ResolveError extends Error {
+  constructor(code, message, { partial = null, cause, status } = {}) {
+    super(message, cause ? { cause } : undefined);
+    this.name = "ResolveError";
+    this.code = code;
+    this.partial = partial;
+    this.status = status;
+  }
+}
+
+// Short, user-facing explanations shown when a DOI falls back to the abstract.
+const FALLBACK_NOTICES = {
+  missing_key: "The summarizer is not configured, so this is the publisher's abstract.",
+  key_rejected: "The summarizer rejected the API key; showing the publisher's abstract.",
+  rate_limited: "The summarizer's quota is used up; showing the publisher's abstract.",
+  extract_failed: "The full text could not be extracted; showing the publisher's abstract.",
+  network: "The summarizer could not be reached; showing the publisher's abstract.",
+};
+
+// Summarizer failures about the service itself rather than the page:
+// no key, rejected key, exhausted quota, unreachable. Another URL cannot fix
+// them (so they stop retries), and they tell the user something actionable
+// (so they win over the less specific "DOI not found").
+const SERVICE_ERROR_CODES = new Set(["missing_key", "key_rejected", "rate_limited", "network"]);
+
+function isRetryable(err) {
+  return !SERVICE_ERROR_CODES.has(err.code) && !(err.status >= 500);
+}
+
+const DEFAULT_FALLBACK_NOTICE =
+  "The full text could not be summarized; showing the publisher's abstract.";
+
+export function fallbackNotice(code) {
+  return FALLBACK_NOTICES[code] ?? DEFAULT_FALLBACK_NOTICE;
+}
+
+export function entryId({ doi, url }) {
+  return doi ? `doi:${doi}` : `url:${urlKey(url) ?? url}`;
+}
+
+function baseResult({ input, doi, url }) {
+  return {
+    id: entryId({ doi, url }),
+    input: input ?? doi ?? url,
+    doi: doi ?? null,
+    url: url ?? null,
+    title: null,
+    authors: [],
+    journal: null,
+    year: null,
+    abstract: null,
+    summary: null,
+    source: null,
+    notice: null,
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * Turn parsed input ({ doi } or { url }) into a result:
+ *   DOI → Crossref metadata → summarize https://doi.org/<doi>
+ *       → on failure fall back to the Crossref abstract (source: "abstract").
+ *   DOI extracted from a publisher URL (`url` set):
+ *       → if summarizing the doi.org link fails, summarize the pasted URL
+ *         before falling back to the abstract;
+ *       → if Crossref does not know the DOI (404), it was probably mis-parsed,
+ *         so summarize the URL itself.
+ *   URL → summarize the URL.
+ * Throws ResolveError (with `partial` metadata when available) or an AbortError.
+ */
+export async function resolveSummary({ doi, url, input }, { signal } = {}) {
+  if (doi) return resolveDoi({ doi, url, input }, { signal });
+  return resolveUrl({ url, input }, { signal });
+}
+
+async function resolveUrl({ url, input }, { signal }) {
+  const result = baseResult({ input, url });
+  try {
+    const { summary } = await summarizeUrl(url, { signal });
+    return { ...result, summary, source: "summary" };
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    throw new ResolveError(err.code ?? "unknown", err.message, { cause: err, status: err.status });
+  }
+}
+
+async function resolveDoi({ doi, url: sourceUrl, input }, { signal }) {
+  let result = baseResult({ input, doi, url: toDoiUrl(doi) });
+
+  try {
+    const meta = await fetchCrossrefWork(doi, { signal });
+    result = { ...result, ...meta, doi: meta.doi || doi };
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    if (err.code === "not_found") {
+      if (!sourceUrl) {
+        throw new ResolveError("doi_not_found", err.message, { cause: err, status: err.status });
+      }
+      try {
+        return await resolveUrl({ url: sourceUrl, input }, { signal });
+      } catch (urlErr) {
+        if (isAbortError(urlErr)) throw urlErr;
+        const serviceError = SERVICE_ERROR_CODES.has(urlErr.code);
+        throw new ResolveError(
+          serviceError ? urlErr.code : "doi_not_found",
+          `${err.message} The page itself could not be summarized either: ${urlErr.message}`,
+          { cause: urlErr, status: serviceError ? urlErr.status : err.status }
+        );
+      }
+    }
+    // Metadata is optional: keep going and try to summarize anyway.
+  }
+
+  const hasMeta = Boolean(result.title || result.abstract || result.authors.length);
+
+  // Try the doi.org link first, then the pasted publisher URL (the doi.org
+  // redirect may land on a page the extractor cannot read). Stop early when
+  // another attempt cannot help.
+  const candidates = [toDoiUrl(result.doi), sourceUrl].filter(Boolean);
+  let firstErr = null;
+  let lastErr = null;
+  for (const candidate of candidates) {
+    try {
+      const { summary } = await summarizeUrl(candidate, { signal });
+      return { ...result, summary, source: "summary" };
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      firstErr ??= err;
+      lastErr = err;
+      if (!isRetryable(err)) break;
+    }
+  }
+
+  // Which failure to report: a service error (no key, rejected key, quota,
+  // unreachable) is actionable and wins, as in the Crossref-404 branch;
+  // otherwise the first (doi.org) failure, which explains why the paper
+  // itself could not be summarized.
+  const reported = SERVICE_ERROR_CODES.has(lastErr.code) ? lastErr : firstErr;
+  const other = reported === firstErr ? lastErr : firstErr;
+
+  if (result.abstract) {
+    return {
+      ...result,
+      summary: result.abstract,
+      source: "abstract",
+      notice: fallbackNotice(reported.code),
+    };
+  }
+
+  let message = reported.message;
+  if (other !== reported && other.message !== reported.message) {
+    message +=
+      other === lastErr
+        ? ` The publisher page could not be summarized either: ${other.message}`
+        : ` The DOI link could not be summarized either: ${other.message}`;
+  }
+  if (hasMeta) message += " Crossref has no abstract for this paper either.";
+
+  throw new ResolveError(reported.code ?? "unknown", message, {
+    partial: hasMeta ? result : null,
+    cause: reported,
+    status: reported.status,
+  });
+}
