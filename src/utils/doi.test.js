@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDoi, toDoiUrl } from "./doi";
+import { isDoiOrgUrl, parseDoi, toDoiUrl } from "./doi";
 
 describe("parseDoi", () => {
   it.each([
@@ -9,6 +9,9 @@ describe("parseDoi", () => {
     ["DOI: 10.1038/nature12373", "10.1038/nature12373"],
     ["https://doi.org/10.1038/nature12373", "10.1038/nature12373"],
     ["http://dx.doi.org/10.1038/nature12373", "10.1038/nature12373"],
+    ["https://www.doi.org/10.1038/nature12373", "10.1038/nature12373"],
+    ["<10.1038/nature12373>", "10.1038/nature12373"],
+    ["See <https://doi.org/10.1038/nature12373>.", "10.1038/nature12373"],
     ["https://doi.org/10.1038%2Fnature12373", "10.1038/nature12373"],
   ])("parses %j", (input, expected) => {
     expect(parseDoi(input)).toBe(expected);
@@ -70,6 +73,21 @@ describe("parseDoi", () => {
       expect(parseDoi(input)).toBeNull();
     }
   );
+});
+
+describe("isDoiOrgUrl", () => {
+  it.each([
+    ["https://doi.org/10.1/x", true],
+    ["http://dx.doi.org/10.1/x", true],
+    ["https://www.doi.org/10.1/x", true],
+    ["https://DOI.org/10.1/x", true],
+    ["https://link.springer.com/article/10.1/x", false],
+    ["https://notdoi.org/10.1/x", false],
+    ["ftp://doi.org/10.1/x", false],
+    ["not a url", false],
+  ])("%s → %s", (href, expected) => {
+    expect(isDoiOrgUrl(href)).toBe(expected);
+  });
 });
 
 describe("toDoiUrl", () => {

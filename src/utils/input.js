@@ -1,4 +1,4 @@
-import { parseDoi } from "./doi";
+import { isDoiOrgUrl, parseDoi } from "./doi";
 
 // "example.com/path" without a scheme. The last label must be a 2+ letter TLD,
 // so things like "10.123/abc" (which new URL() would read as the IPv4
@@ -6,7 +6,6 @@ import { parseDoi } from "./doi";
 const BARE_DOMAIN_RE = /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i;
 // A scheme such as "https:" (but not "example.com:8080", which is a port).
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:(?!\d)/i;
-const DOI_ORG_HOST_RE = /^(?:dx\.)?doi\.org$/i;
 
 /** Parse an http(s) URL; a bare "example.com/path" gets https:// added. Returns href or null. */
 export function parseHttpUrl(input) {
@@ -48,8 +47,7 @@ export function parseInput(input) {
   const doi = parseDoi(input);
   const url = parseHttpUrl(input);
   if (doi) {
-    const keepUrl = url && !DOI_ORG_HOST_RE.test(new URL(url).hostname);
-    return { doi, url: keepUrl ? url : null };
+    return { doi, url: url && !isDoiOrgUrl(url) ? url : null };
   }
   if (url) return { doi: null, url };
   return null;

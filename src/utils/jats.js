@@ -3,8 +3,9 @@
 // stripJats turns them (or plain HTML) into readable plain text with
 // paragraphs separated by a blank line.
 
-// A first paragraph that is only an "Abstract"/"Summary" heading is dropped,
-// wherever the heading sits (bare, or inside <jats:sec>).
+// With { dropHeading: true } (used for abstracts only), a first paragraph
+// that is just an "Abstract"/"Summary" heading is dropped, wherever the
+// heading sits (bare, or inside <jats:sec>).
 const HEADING_ONLY_RE = /^(?:abstract|summary)\s*[:.]?$/i;
 const BLOCK_TAG_RE =
   /<\/?(?:jats:)?(?:p|sec|title|list|list-item|abstract|trans-abstract|disp-quote|br|div|h[1-6]|li|ul|ol)\b[^>]*\/?>/gi;
@@ -39,7 +40,7 @@ function decodeEntities(text) {
   });
 }
 
-export function stripJats(markup) {
+export function stripJats(markup, { dropHeading = false } = {}) {
   if (typeof markup !== "string" || !markup.trim()) return "";
   const text = markup.replace(BLOCK_TAG_RE, "\n").replace(ANY_TAG_RE, "");
 
@@ -47,7 +48,9 @@ export function stripJats(markup) {
     .split(/\n+/)
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean);
-  if (paragraphs.length > 0 && HEADING_ONLY_RE.test(paragraphs[0])) paragraphs.shift();
+  if (dropHeading && paragraphs.length > 0 && HEADING_ONLY_RE.test(paragraphs[0])) {
+    paragraphs.shift();
+  }
 
   return paragraphs.join("\n\n");
 }

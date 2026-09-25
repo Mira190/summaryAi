@@ -6,7 +6,8 @@ export class SummarizerError extends Error {
   constructor(code, message, { status, cause } = {}) {
     super(message, cause ? { cause } : undefined);
     this.name = "SummarizerError";
-    this.code = code; // "missing_key" | "rate_limited" | "extract_failed" | "network"
+    // "missing_key" | "key_rejected" | "rate_limited" | "extract_failed" | "network"
+    this.code = code;
     this.status = status;
   }
 }
@@ -65,7 +66,7 @@ export async function summarizeUrl(url, { signal, apiKey = getApiKey() } = {}) {
   }
   if (response.status === 401 || response.status === 403) {
     throw new SummarizerError(
-      "missing_key",
+      "key_rejected",
       "The summarizer rejected the RapidAPI key (invalid key or no active subscription).",
       { status: response.status }
     );

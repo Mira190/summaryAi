@@ -44,8 +44,16 @@ describe("summarizeUrl", () => {
   it("maps 403 to a rejected-key error", async () => {
     stubFetch([[() => true, () => jsonResponse({ message: "You are not subscribed" }, 403)]]);
     await expect(summarizeUrl("https://example.com")).rejects.toMatchObject({
-      code: "missing_key",
+      code: "key_rejected",
       message: expect.stringMatching(/rejected/),
+    });
+  });
+
+  it("maps 401 to key_rejected", async () => {
+    stubFetch([[() => true, () => jsonResponse({ message: "Invalid API key" }, 401)]]);
+    await expect(summarizeUrl("https://example.com")).rejects.toMatchObject({
+      code: "key_rejected",
+      status: 401,
     });
   });
 

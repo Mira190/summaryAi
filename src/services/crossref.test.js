@@ -41,6 +41,24 @@ describe("normalizeWork", () => {
     });
     expect(normalizeWork({ issued: { "date-parts": [[null]] } }, "10.1234/y").year).toBeNull();
   });
+
+  it("keeps a title that is literally 'Abstract' and maps empty text to null", () => {
+    expect(normalizeWork({ title: ["Abstract"] }, "10.1234/a").title).toBe("Abstract");
+    expect(normalizeWork({ "container-title": ["Summary"] }, "10.1234/a").journal).toBe("Summary");
+    const empty = normalizeWork({ title: ["<i> </i>"], "container-title": ["<b></b>"] }, "10.1234/a");
+    expect(empty.title).toBeNull();
+    expect(empty.journal).toBeNull();
+  });
+
+  it("drops the Abstract heading only from abstracts", () => {
+    const work = {
+      title: ["<i>Summary</i> statistics"],
+      abstract: "<jats:sec><jats:title>Abstract</jats:title><jats:p>Text.</jats:p></jats:sec>",
+    };
+    const meta = normalizeWork(work, "10.1234/a");
+    expect(meta.abstract).toBe("Text.");
+    expect(meta.title).toBe("Summary statistics");
+  });
 });
 
 describe("fetchCrossrefWork", () => {

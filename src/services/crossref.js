@@ -18,6 +18,12 @@ export function buildCrossrefUrl(doi, mailto = import.meta.env.VITE_CROSSREF_MAI
   return mailto ? `${url}?mailto=${encodeURIComponent(mailto)}` : url;
 }
 
+/** Plain single-line text from a JATS/HTML string, or null when empty. */
+function inlineText(value) {
+  const text = value ? stripJats(value).replace(/\s+/g, " ").trim() : "";
+  return text || null;
+}
+
 function firstString(value) {
   const first = Array.isArray(value) ? value[0] : value;
   return typeof first === "string" && first.trim() ? first : null;
@@ -41,14 +47,15 @@ function formatAuthor(author) {
 export function normalizeWork(work, doi) {
   const title = firstString(work?.title);
   const journal = firstString(work?.["container-title"]);
-  const abstract = typeof work?.abstract === "string" ? stripJats(work.abstract) : "";
+  const abstract =
+    typeof work?.abstract === "string" ? stripJats(work.abstract, { dropHeading: true }) : "";
   const normalizedDoi = (typeof work?.DOI === "string" ? work.DOI : doi).toLowerCase();
 
   return {
     doi: normalizedDoi,
-    title: title ? stripJats(title).replace(/\s+/g, " ") : null,
+    title: inlineText(title),
     authors: Array.isArray(work?.author) ? work.author.map(formatAuthor).filter(Boolean) : [],
-    journal: journal ? stripJats(journal).replace(/\s+/g, " ") : null,
+    journal: inlineText(journal),
     year: pickYear(work),
     abstract: abstract || null,
     url: typeof work?.URL === "string" ? work.URL : toDoiUrl(normalizedDoi),

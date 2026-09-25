@@ -9,6 +9,7 @@ describe("parseInput", () => {
     ["https://example.com/blog/post", { doi: null, url: "https://example.com/blog/post" }],
     ["example.com/blog/post", { doi: null, url: "https://example.com/blog/post" }],
     ["http://dx.doi.org/10.1038/nature12373", { doi: "10.1038/nature12373", url: null }],
+    ["https://www.doi.org/10.1038/missing", { doi: "10.1038/missing", url: null }],
     [
       "https://link.springer.com/article/10.1007/s00125-020-05100-9/fulltext.html",
       {

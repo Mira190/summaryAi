@@ -34,8 +34,10 @@ API on RapidAPI.
 1. Fetch metadata from `https://api.crossref.org/works/{doi}`. An unknown DOI
    (404) stops here with "DOI not found" — unless the DOI was taken from a
    publisher URL, in which case that URL is summarized directly instead.
-2. Ask the summarizer to summarize `https://doi.org/{doi}`.
-3. If that fails and Crossref has an abstract, show the abstract instead.
+2. Ask the summarizer to summarize `https://doi.org/{doi}`. If that fails and
+   the DOI came from a publisher URL, try summarizing that URL too.
+3. If summarizing still fails and Crossref has an abstract, show the abstract
+   instead, with a short note on why.
 4. If neither works, show the error and keep whatever metadata was found.
 
 ## Getting started

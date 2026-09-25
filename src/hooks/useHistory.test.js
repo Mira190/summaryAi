@@ -96,6 +96,21 @@ describe("history helpers", () => {
     expect(findCachedSummary(list, { doi: "10.1/b" })).toBeNull();
     expect(findEntry(list, { doi: "10.1/b" })).toBe(fallback);
   });
+
+  it("checks the URL independently when the DOI hit is only an abstract", () => {
+    const fallback = entry(1, {
+      id: "doi:10.1/x",
+      doi: "10.1/x",
+      url: "https://doi.org/10.1/x",
+      source: "abstract",
+    });
+    const urlSummary = entry(2, { url: "https://publisher.example/y", id: "url:https://publisher.example/y" });
+    const list = [fallback, urlSummary];
+    expect(findCachedSummary(list, { doi: "10.1/x", url: "https://publisher.example/y" })).toBe(
+      urlSummary
+    );
+    expect(findCachedSummary(list, { doi: "10.1/x", url: null })).toBeNull();
+  });
 });
 
 describe("useHistory", () => {

@@ -11,13 +11,24 @@ const linkFor = (item) => (item.doi ? toDoiUrl(item.doi) : item.url);
 const HistoryList = ({ items, activeId, onSelect, onDelete }) => {
   const [copiedId, setCopiedId] = useState(null);
   const timerRef = useRef(null);
+  // Each copy click gets a sequence number; only the latest click may update
+  // the icon, and nothing updates after unmount.
+  const copySeqRef = useRef(0);
+  const mountedRef = useRef(false);
 
-  useEffect(() => () => clearTimeout(timerRef.current), []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(timerRef.current);
+    };
+  }, []);
 
   if (items.length === 0) return null;
 
   const handleCopy = async (event, item) => {
     event.stopPropagation();
+    const seq = ++copySeqRef.current;
     const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
     if (typeof clipboard?.writeText !== "function") return;
     try {
@@ -26,6 +37,7 @@ const HistoryList = ({ items, activeId, onSelect, onDelete }) => {
       // Permission denied or insecure context: leave the icon unchanged.
       return;
     }
+    if (!mountedRef.current || seq !== copySeqRef.current) return;
     setCopiedId(item.id);
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopiedId(null), COPIED_MS);
