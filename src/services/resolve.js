@@ -14,6 +14,20 @@ export class ResolveError extends Error {
   }
 }
 
+// Short, user-facing explanations shown when a DOI falls back to the abstract.
+const FALLBACK_NOTICES = {
+  missing_key: "The summarizer is not configured, so this is the publisher's abstract.",
+  rate_limited: "The summarizer's quota is used up; showing the publisher's abstract.",
+  extract_failed: "The full text could not be extracted; showing the publisher's abstract.",
+  network: "The summarizer could not be reached; showing the publisher's abstract.",
+};
+const DEFAULT_FALLBACK_NOTICE =
+  "The full text could not be summarized; showing the publisher's abstract.";
+
+export function fallbackNotice(code) {
+  return FALLBACK_NOTICES[code] ?? DEFAULT_FALLBACK_NOTICE;
+}
+
 export function entryId({ doi, url }) {
   return doi ? `doi:${doi}` : `url:${urlKey(url) ?? url}`;
 }
@@ -40,11 +54,13 @@ function baseResult({ input, doi, url }) {
  * Turn parsed input ({ doi } or { url }) into a result:
  *   DOI → Crossref metadata → summarize https://doi.org/<doi>
  *       → on failure fall back to the Crossref abstract (source: "abstract").
+ *   DOI extracted from a publisher URL that Crossref does not know (404)
+ *       → the DOI was probably mis-parsed, so summarize the URL itself.
  *   URL → summarize the URL.
  * Throws ResolveError (with `partial` metadata when available) or an AbortError.
  */
 export async function resolveSummary({ doi, url, input }, { signal } = {}) {
-  if (doi) return resolveDoi({ doi, input }, { signal });
+  if (doi) return resolveDoi({ doi, url, input }, { signal });
   return resolveUrl({ url, input }, { signal });
 }
 
@@ -59,7 +75,7 @@ async function resolveUrl({ url, input }, { signal }) {
   }
 }
 
-async function resolveDoi({ doi, input }, { signal }) {
+async function resolveDoi({ doi, url: sourceUrl, input }, { signal }) {
   let result = baseResult({ input, doi, url: toDoiUrl(doi) });
 
   try {
@@ -68,6 +84,7 @@ async function resolveDoi({ doi, input }, { signal }) {
   } catch (err) {
     if (isAbortError(err)) throw err;
     if (err.code === "not_found") {
+      if (sourceUrl) return resolveUrl({ url: sourceUrl, input }, { signal });
       throw new ResolveError("doi_not_found", err.message, { cause: err });
     }
     // Metadata is optional: keep going and try to summarize anyway.
@@ -85,7 +102,7 @@ async function resolveDoi({ doi, input }, { signal }) {
         ...result,
         summary: result.abstract,
         source: "abstract",
-        notice: `Full-text summary unavailable: ${err.message}`,
+        notice: fallbackNotice(err.code),
       };
     }
     throw new ResolveError(

@@ -5,6 +5,7 @@ import {
   HISTORY_KEY,
   HISTORY_LIMIT,
   addEntry,
+  findCachedSummary,
   findEntry,
   migrateHistory,
   useHistory,
@@ -76,6 +77,24 @@ describe("history helpers", () => {
     expect(findEntry(list, { doi: "10.1/b" })?.summary).toBe("Summary 2");
     expect(findEntry(list, { url: "https://EXAMPLE.com/1/" })?.summary).toBe("Summary 1");
     expect(findEntry(list, { doi: "10.1/zzz" })).toBeNull();
+    // A DOI miss falls back to the URL (e.g. a publisher URL that was summarized directly).
+    expect(findEntry(list, { doi: "10.1/zzz", url: "https://example.com/1" })?.summary).toBe(
+      "Summary 1"
+    );
+  });
+
+  it("only serves AI summaries as cache hits", () => {
+    const summary = entry(1, { id: "doi:10.1/a", doi: "10.1/a", url: "https://doi.org/10.1/a" });
+    const fallback = entry(2, {
+      id: "doi:10.1/b",
+      doi: "10.1/b",
+      url: "https://doi.org/10.1/b",
+      source: "abstract",
+    });
+    const list = [summary, fallback];
+    expect(findCachedSummary(list, { doi: "10.1/a" })).toBe(summary);
+    expect(findCachedSummary(list, { doi: "10.1/b" })).toBeNull();
+    expect(findEntry(list, { doi: "10.1/b" })).toBe(fallback);
   });
 });
 

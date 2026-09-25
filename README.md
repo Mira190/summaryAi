@@ -23,15 +23,17 @@ API on RapidAPI.
   blocked pages) the app shows the publisher's abstract from Crossref instead,
   labelled "Publisher abstract via Crossref".
 - **History**: the last 20 summaries are kept in `localStorage`. Entries can be
-  reopened, have their link copied, or be deleted. Re-submitting the same DOI or
-  URL is served from history without new API calls.
+  reopened, have their link copied, or be deleted. Re-submitting a DOI or URL
+  that already has an AI summary is served from history without new API calls;
+  entries that fell back to the abstract are retried.
 - **Readable errors** for invalid input, unknown DOIs, a missing or rejected API
   key, exhausted quota (HTTP 429), network problems and failed extraction.
 
 ### How a DOI is resolved
 
 1. Fetch metadata from `https://api.crossref.org/works/{doi}`. An unknown DOI
-   (404) stops here with "DOI not found".
+   (404) stops here with "DOI not found" — unless the DOI was taken from a
+   publisher URL, in which case that URL is summarized directly instead.
 2. Ask the summarizer to summarize `https://doi.org/{doi}`.
 3. If that fails and Crossref has an abstract, show the abstract instead.
 4. If neither works, show the error and keep whatever metadata was found.

@@ -76,12 +76,80 @@ describe("<App /> summary flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Copy link for/ }));
     expect(writeText).toHaveBeenCalledWith("https://example.com/old");
+    expect(await screen.findByRole("button", { name: "Link copied" })).toBeTruthy();
     expect(screen.queryByText("Old summary")).toBeNull();
-    expect(screen.getByRole("button", { name: "Link copied" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Delete .* from history/ }));
     expect(screen.queryByRole("list", { name: "Recent summaries" })).toBeNull();
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem(HISTORY_KEY))).toEqual([]));
+  });
+
+  it.each([
+    ["writeText rejects", { writeText: vi.fn(() => Promise.reject(new Error("denied"))) }],
+    ["the clipboard API is missing", undefined],
+  ])("does not claim the link was copied when %s", async (_label, clipboard) => {
+    window.localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify([{ url: "https://example.com/old", summary: "Old summary" }])
+    );
+    vi.stubGlobal("navigator", { ...navigator, clipboard });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Copy link for/ }));
+    if (clipboard) await waitFor(() => expect(clipboard.writeText).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("button", { name: "Link copied" })).toBeNull();
+    expect(screen.getByRole("button", { name: /Copy link for/ })).toBeTruthy();
+  });
+
+  it("retries a DOI whose earlier result fell back to the abstract", async () => {
+    let summarizerUp = false;
+    const fetchMock = stubFetch([
+      [isCrossref, () => jsonResponse({ message: crossrefWork })],
+      [
+        isRapidApi,
+        () =>
+          summarizerUp
+            ? jsonResponse({ summary: "Diamond sensors measure temperature." })
+            : jsonResponse({}, 429),
+      ],
+    ]);
+    render(<App />);
+
+    submit(DOI);
+    expect(await screen.findByText("Publisher abstract via Crossref")).toBeTruthy();
+    expect(screen.getByText("Sensitive probing of temperature.")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(JSON.parse(window.localStorage.getItem(HISTORY_KEY))).toMatchObject([
+        { doi: DOI, source: "abstract" },
+      ])
+    );
+
+    summarizerUp = true;
+    submit(DOI);
+    expect(await screen.findByText("Diamond sensors measure temperature.")).toBeTruthy();
+    expect(screen.queryByText("Publisher abstract via Crossref")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await waitFor(() =>
+      expect(JSON.parse(window.localStorage.getItem(HISTORY_KEY))).toMatchObject([
+        { doi: DOI, source: "summary", summary: "Diamond sensors measure temperature." },
+      ])
+    );
+    expect(JSON.parse(window.localStorage.getItem(HISTORY_KEY))).toHaveLength(1);
+  });
+
+  it("summarizes a publisher URL directly when its embedded DOI is unknown to Crossref", async () => {
+    const url = "https://www.biorxiv.org/content/10.1101/2020.01.01.123456v1.full.pdf";
+    stubFetch([
+      [isCrossref, () => jsonResponse("Resource not found.", 404)],
+      [isRapidApi, () => jsonResponse({ summary: "Preprint summary." })],
+    ]);
+    render(<App />);
+    submit(url);
+
+    expect(await screen.findByText("Preprint summary.")).toBeTruthy();
+    expect(screen.queryByText(/DOI not found/)).toBeNull();
   });
 
   it("shows a history entry when it is selected", () => {

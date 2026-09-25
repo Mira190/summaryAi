@@ -62,11 +62,25 @@ export function migrateHistory(raw) {
   return out;
 }
 
+/** Find a history entry by DOI, falling back to the (normalized) URL. */
 export function findEntry(list, { doi, url } = {}) {
-  if (doi) return list.find((item) => item.doi === doi) ?? null;
+  if (doi) {
+    const hit = list.find((item) => item.doi === doi);
+    if (hit) return hit;
+  }
   const key = url ? urlKey(url) : null;
   if (!key) return null;
   return list.find((item) => item.url && urlKey(item.url) === key) ?? null;
+}
+
+/**
+ * Like findEntry, but only returns real AI summaries. Abstract-fallback
+ * entries stay in history (and can be selected) but are never served as a
+ * cache hit, so re-submitting retries the summarizer.
+ */
+export function findCachedSummary(list, query) {
+  const entry = findEntry(list, query);
+  return entry?.source === "summary" ? entry : null;
 }
 
 /** Summary history persisted in localStorage under "articles". */
@@ -91,6 +105,7 @@ export function useHistory() {
   const clear = useCallback(() => setItems([]), []);
 
   const find = useCallback((query) => findEntry(items, query), [items]);
+  const findCached = useCallback((query) => findCachedSummary(items, query), [items]);
 
-  return { items, add, remove, clear, find };
+  return { items, add, remove, clear, find, findCached };
 }

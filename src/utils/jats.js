@@ -3,8 +3,9 @@
 // stripJats turns them (or plain HTML) into readable plain text with
 // paragraphs separated by a blank line.
 
-const LEADING_HEADING_RE =
-  /^\s*<(?:jats:)?title\b[^>]*>\s*(?:abstract|summary)\s*[.:]?\s*<\/(?:jats:)?title>/i;
+// A first paragraph that is only an "Abstract"/"Summary" heading is dropped,
+// wherever the heading sits (bare, or inside <jats:sec>).
+const HEADING_ONLY_RE = /^(?:abstract|summary)\s*[:.]?$/i;
 const BLOCK_TAG_RE =
   /<\/?(?:jats:)?(?:p|sec|title|list|list-item|abstract|trans-abstract|disp-quote|br|div|h[1-6]|li|ul|ol)\b[^>]*\/?>/gi;
 const ANY_TAG_RE = /<\/?[a-z][^>]*>/gi;
@@ -40,14 +41,13 @@ function decodeEntities(text) {
 
 export function stripJats(markup) {
   if (typeof markup !== "string" || !markup.trim()) return "";
-  const text = markup
-    .replace(LEADING_HEADING_RE, "")
-    .replace(BLOCK_TAG_RE, "\n")
-    .replace(ANY_TAG_RE, "");
+  const text = markup.replace(BLOCK_TAG_RE, "\n").replace(ANY_TAG_RE, "");
 
-  return decodeEntities(text)
+  const paragraphs = decodeEntities(text)
     .split(/\n+/)
     .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .join("\n\n");
+    .filter(Boolean);
+  if (paragraphs.length > 0 && HEADING_ONLY_RE.test(paragraphs[0])) paragraphs.shift();
+
+  return paragraphs.join("\n\n");
 }

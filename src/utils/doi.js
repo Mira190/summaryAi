@@ -2,13 +2,17 @@
 // A DOI is "10.<registrant>/<suffix>"; the suffix may contain almost any
 // printable character, so we match greedily and then trim what is clearly
 // not part of it (trailing punctuation, URL query strings, publisher view
-// suffixes such as "/full" or "/pdf").
+// suffixes such as "/full", "/fulltext.html" or ".full.pdf").
+// "<" and ">" are allowed because SICI-style DOIs contain them.
 
-const DOI_RE = /10\.\d{4,9}\/[^\s"<>]+/i;
+const DOI_RE = /10\.\d{4,9}\/[^\s"]+/i;
 const PREFIX_RE = /^(?:doi:\s*|https?:\/\/(?:dx\.)?doi\.org\/)/i;
 const URL_RE = /^https?:\/\//i;
-const TRAILING_PUNCT_RE = /[.,;:!?'"\]}]+$/;
-const PUBLISHER_SUFFIX_RE = /\/(?:full|abstract|pdf|epdf|pdfdirect|html|meta|summary)$/i;
+const TRAILING_PUNCT_RE = /[.,;:!?'"\]}/]+$/;
+// Publisher "view" suffixes that follow the DOI in landing-page URLs, e.g.
+// /full, /abstract, /pdf, /fulltext.html, .full, .full.pdf, .pdf
+const PUBLISHER_SUFFIX_RE =
+  /(?:\/(?:full|fulltext|abstract|pdf|epdf|pdfdirect|html|meta|summary)(?:\.html?)?|\.full(?:\.pdf|\.html?)?|\.pdf)$/i;
 
 function safeDecode(value) {
   try {
@@ -53,24 +57,18 @@ export function parseDoi(input) {
   const match = value.match(DOI_RE);
   if (!match) return null;
 
-  let doi = match[0];
+  let doi = stripTrailing(match[0]);
   if (isUrl) {
     // Inside a URL, "?", "#" and "&" start the query string / fragment.
     doi = doi.split(/[?#&]/)[0];
-    doi = doi.replace(PUBLISHER_SUFFIX_RE, "");
+    for (;;) {
+      const before = doi;
+      doi = stripTrailing(doi).replace(PUBLISHER_SUFFIX_RE, "");
+      if (doi === before) break;
+    }
   }
-  doi = stripTrailing(doi);
 
   return DOI_RE.test(doi) ? doi.toLowerCase() : null;
-}
-
-/** True when the whole input is a DOI (optionally with a doi:/doi.org prefix). */
-export function isDoi(input) {
-  if (typeof input !== "string") return false;
-  const doi = parseDoi(input);
-  if (!doi) return false;
-  const rest = input.trim().replace(PREFIX_RE, "").trim();
-  return stripTrailing(safeDecode(rest)).toLowerCase() === doi;
 }
 
 /** Resolver URL for a DOI, e.g. https://doi.org/10.1038/nature12373 */

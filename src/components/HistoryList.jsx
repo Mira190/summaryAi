@@ -16,12 +16,15 @@ const HistoryList = ({ items, activeId, onSelect, onDelete }) => {
 
   if (items.length === 0) return null;
 
-  const handleCopy = (event, item) => {
+  const handleCopy = async (event, item) => {
     event.stopPropagation();
+    const clipboard = typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+    if (typeof clipboard?.writeText !== "function") return;
     try {
-      Promise.resolve(navigator.clipboard?.writeText(linkFor(item))).catch(() => {});
+      await clipboard.writeText(linkFor(item));
     } catch {
-      // Clipboard access can throw synchronously in insecure contexts.
+      // Permission denied or insecure context: leave the icon unchanged.
+      return;
     }
     setCopiedId(item.id);
     clearTimeout(timerRef.current);

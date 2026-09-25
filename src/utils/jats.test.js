@@ -9,6 +9,18 @@ describe("stripJats", () => {
     expect(stripJats(input)).toBe("Quantum dots are small.\n\nSecond & last paragraph with H2O.");
   });
 
+  it("drops an Abstract/Summary heading nested in a section", () => {
+    expect(
+      stripJats("<jats:sec><jats:title>Abstract</jats:title><jats:p>Text.</jats:p></jats:sec>")
+    ).toBe("Text.");
+    expect(stripJats("<jats:title>SUMMARY:</jats:title><jats:p>Text.</jats:p>")).toBe("Text.");
+    expect(stripJats("<p>Summary.</p><p>Text.</p>")).toBe("Text.");
+  });
+
+  it("keeps a first paragraph that merely starts with the word Abstract", () => {
+    expect(stripJats("<jats:p>Abstract algebra is fun.</jats:p>")).toBe("Abstract algebra is fun.");
+  });
+
   it("keeps section titles other than Abstract as their own paragraph", () => {
     const input = "<jats:sec><jats:title>Background</jats:title><jats:p>Text.</jats:p></jats:sec>";
     expect(stripJats(input)).toBe("Background\n\nText.");

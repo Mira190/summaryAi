@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveSummary } from "./resolve";
+import { parseInput } from "../utils/input";
 import {
   abortError,
   crossrefWork,
@@ -43,7 +44,30 @@ describe("resolveSummary", () => {
     const result = await resolveSummary({ doi: DOI });
     expect(result.source).toBe("abstract");
     expect(result.summary).toBe("Sensitive probing of temperature.");
-    expect(result.notice).toMatch(/Paywalled/);
+    expect(result.notice).toBe(
+      "The full text could not be extracted; showing the publisher's abstract."
+    );
+  });
+
+  it.each([
+    [429, "The summarizer's quota is used up; showing the publisher's abstract."],
+    [403, "The summarizer is not configured, so this is the publisher's abstract."],
+  ])("DOI: uses a short user-facing notice for HTTP %i", async (status, notice) => {
+    stubFetch([
+      [isCrossref, () => jsonResponse({ message: crossrefWork })],
+      [isRapidApi, () => jsonResponse({}, status)],
+    ]);
+    await expect(resolveSummary({ doi: DOI })).resolves.toMatchObject({ source: "abstract", notice });
+  });
+
+  it("DOI: uses a short notice when the summarizer is unreachable", async () => {
+    stubFetch([
+      [isCrossref, () => jsonResponse({ message: crossrefWork })],
+      [isRapidApi, () => Promise.reject(new TypeError("Failed to fetch"))],
+    ]);
+    await expect(resolveSummary({ doi: DOI })).resolves.toMatchObject({
+      notice: "The summarizer could not be reached; showing the publisher's abstract.",
+    });
   });
 
   it("DOI: falls back to the abstract when the API key is missing", async () => {
@@ -51,6 +75,8 @@ describe("resolveSummary", () => {
     const fetchMock = stubFetch([[isCrossref, () => jsonResponse({ message: crossrefWork })]]);
     const result = await resolveSummary({ doi: DOI });
     expect(result.source).toBe("abstract");
+    expect(result.notice).toBe("The summarizer is not configured, so this is the publisher's abstract.");
+    expect(result.notice).not.toMatch(/VITE_|\.env/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -71,6 +97,35 @@ describe("resolveSummary", () => {
       code: "doi_not_found",
       message: expect.stringMatching(/DOI not found/),
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("DOI from a publisher URL: summarizes the URL itself when Crossref does not know the DOI", async () => {
+    const url = "https://www.biorxiv.org/content/10.1101/2020.01.01.123456v1.full.pdf";
+    const parsed = parseInput(url);
+    expect(parsed).toEqual({ doi: "10.1101/2020.01.01.123456v1", url });
+
+    const fetchMock = stubFetch([
+      [isCrossref, () => jsonResponse("Resource not found.", 404)],
+      [isRapidApi, () => jsonResponse({ summary: "Preprint summary." })],
+    ]);
+    const result = await resolveSummary({ ...parsed, input: url });
+    expect(result).toMatchObject({
+      id: `url:${url}`,
+      doi: null,
+      url,
+      summary: "Preprint summary.",
+      source: "summary",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain(encodeURIComponent(url));
+  });
+
+  it("DOI from a doi.org link: a Crossref 404 is still reported as DOI not found", async () => {
+    const parsed = parseInput("https://doi.org/10.1038/missing");
+    expect(parsed.url).toBeNull();
+    const fetchMock = stubFetch([[isCrossref, () => jsonResponse("Resource not found.", 404)]]);
+    await expect(resolveSummary(parsed)).rejects.toMatchObject({ code: "doi_not_found" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

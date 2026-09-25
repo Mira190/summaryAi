@@ -13,7 +13,8 @@ const Demo = () => {
   const [input, setInput] = useState("");
   const history = useHistory();
   const { status, result, error, submit, cancel, show } = useSummary({
-    lookup: history.find,
+    // Only real AI summaries are cache hits; abstract fallbacks are retried.
+    lookup: history.findCached,
     onResult: history.add,
   });
   const loading = status === "loading";
@@ -30,8 +31,8 @@ const Demo = () => {
         <SearchForm value={input} onChange={setInput} onSubmit={submit} loading={loading} />
         {keyMissing && (
           <p className="font-satoshi text-sm text-gray-100">
-            No summarizer key configured (VITE_RAPID_API_ARTICLE_KEY): DOI lookups will show the
-            publisher abstract from Crossref, and plain URLs cannot be summarized.
+            The summarizer is not configured: DOI lookups will show the publisher&apos;s abstract
+            from Crossref, and plain URLs cannot be summarized.
           </p>
         )}
         <HistoryList

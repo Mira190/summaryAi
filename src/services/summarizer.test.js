@@ -28,7 +28,7 @@ describe("summarizeUrl", () => {
     await expect(summarizeUrl("https://example.com")).rejects.toMatchObject({
       name: "SummarizerError",
       code: "missing_key",
-      message: expect.stringMatching(/VITE_RAPID_API_ARTICLE_KEY/),
+      message: "The summarizer is not configured: no RapidAPI key is set.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

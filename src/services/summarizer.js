@@ -27,7 +27,7 @@ export async function summarizeUrl(url, { signal, apiKey = getApiKey() } = {}) {
   if (!apiKey) {
     throw new SummarizerError(
       "missing_key",
-      "The summarizer is not configured: set VITE_RAPID_API_ARTICLE_KEY in your .env file and restart the dev server."
+      "The summarizer is not configured: no RapidAPI key is set."
     );
   }
 
@@ -66,7 +66,7 @@ export async function summarizeUrl(url, { signal, apiKey = getApiKey() } = {}) {
   if (response.status === 401 || response.status === 403) {
     throw new SummarizerError(
       "missing_key",
-      "The summarizer rejected the RapidAPI key. Check VITE_RAPID_API_ARTICLE_KEY and your subscription.",
+      "The summarizer rejected the RapidAPI key (invalid key or no active subscription).",
       { status: response.status }
     );
   }
