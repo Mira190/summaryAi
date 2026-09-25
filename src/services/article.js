@@ -1,25 +1,33 @@
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
+import { useState } from "preact/hooks";
 
+// Temporary fetch-based replacement for the former RTK Query endpoint.
+// Replaced by services/summarizer.js + hooks/useSummary.js in the next commits.
 const rapidApiKey = import.meta.env.VITE_RAPID_API_ARTICLE_KEY;
 
-export const articleApi = createApi({
-    reducerPath: 'articleApi',
-    baseQuery: fetchBaseQuery({
-        baseUrl: 'https://article-extractor-and-summarizer.p.rapidapi.com/',
-        prepareHeaders: (headers) => {
-            headers.set('X-RapidAPI-Key', rapidApiKey);
-            headers.set('X-RapidAPI-Host', 'article-extractor-and-summarizer.p.rapidapi.com');
+export const useLazyGetSummaryQuery = () => {
+  const [state, setState] = useState({ error: null, isFetching: false });
 
-            return headers;
-        },
-    }),
-    endpoints: (builder) => ({
-        getSummary: builder.query({
-            // encodeURIComponent() function encodes special characters that may be present in the parameter values
-            // If we do not properly encode these characters, they can be misinterpreted by the server and cause errors or unexpected behavior. Thus that RTK bug
-            query: (params) => `summarize?url=${encodeURIComponent(params.articleUrl)}&length=3`,
-        }),
-    }),
-})
+  const getSummary = async ({ articleUrl }) => {
+    setState({ error: null, isFetching: true });
+    try {
+      const res = await fetch(
+        `https://article-extractor-and-summarizer.p.rapidapi.com/summarize?url=${encodeURIComponent(articleUrl)}&length=3`,
+        {
+          headers: {
+            "X-RapidAPI-Key": rapidApiKey,
+            "X-RapidAPI-Host": "article-extractor-and-summarizer.p.rapidapi.com",
+          },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw { data };
+      setState({ error: null, isFetching: false });
+      return { data };
+    } catch (error) {
+      setState({ error, isFetching: false });
+      return { error };
+    }
+  };
 
-export const { useLazyGetSummaryQuery } = articleApi
+  return [getSummary, state];
+};
